@@ -1,0 +1,84 @@
+name: QEMU 11.1.2 port smoke test
+
+on:
+  push:
+    branches:
+      - port/qemu-11.1.2
+    paths:
+      - '.github/workflows/qemu-11.1.2-port.yml'
+      - 'QEMU-11.1.2-PORTING.md'
+      - 'limbo-android-lib/src/main/jni/**'
+  pull_request:
+    branches:
+      - master
+    paths:
+      - '.github/workflows/qemu-11.1.2-port.yml'
+      - 'QEMU-11.1.2-PORTING.md'
+      - 'limbo-android-lib/src/main/jni/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qemu-11-port-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  upstream-target-smoke-test:
+    name: QEMU 11.1.2 target/build smoke test (Linux host)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - name: Install QEMU build dependencies
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential ca-certificates curl git libglib2.0-dev \
+            libpixman-1-dev libfdt-dev libslirp-dev ninja-build pkg-config \
+            python3 python3-venv python3-pip python3-setuptools python3-wheel \
+            zlib1g-dev
+
+      - name: Download and verify QEMU source archive
+        run: |
+          set -euxo pipefail
+          curl --fail --location --retry 3 \
+            https://download.qemu.org/qemu-11.1.2.tar.xz \
+            --output /tmp/qemu-11.1.2.tar.xz
+          tar -tJf /tmp/qemu-11.1.2.tar.xz | head -n 1 | grep -q '^qemu-11.1.2/'
+          tar -xJf /tmp/qemu-11.1.2.tar.xz -C "$RUNNER_TEMP"
+
+      - name: Configure modern QEMU build system
+        working-directory: ${{ runner.temp }}/qemu-11.1.2
+        run: |
+          set -euxo pipefail
+          ./configure \
+            --target-list=x86_64-softmmu,aarch64-softmmu,ppc64-softmmu,sparc-softmmu \
+            --disable-docs \
+            --disable-werror
+
+      - name: Build the four guest system targets
+        working-directory: ${{ runner.temp }}/qemu-11.1.2
+        run: |
+          set -euxo pipefail
+          make -j2
+
+      - name: Verify target binaries and version
+        working-directory: ${{ runner.temp }}/qemu-11.1.2
+        run: |
+          set -euxo pipefail
+          ./qemu-system-x86_64 --version | grep -F 'QEMU emulator version 11.1.2'
+          test -x ./qemu-system-x86_64
+          test -x ./qemu-system-aarch64
+          test -x ./qemu-system-ppc64
+          test -x ./qemu-system-sparc
+
+      - name: Upload configure summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qemu-11.1.2-upstream-smoke-test
+          path: ${{ runner.temp }}/qemu-11.1.2/config.log
+          if-no-files-found: warn
+          retention-days: 14
