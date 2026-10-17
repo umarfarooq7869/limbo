@@ -219,19 +219,22 @@ JNIEXPORT jstring JNICALL Java_com_max2idea_android_limbo_jni_VMExecutor_start(
 	setup_jni(env, thiz, storage_dir, base_dir);
     set_qemu_var(env, thiz, "limbo_sdl_scale_hint", sdl_scale_hint);
 
-	typedef void (*main_t)(int argc, char **argv, char **envp);
-    typedef void (*qemu_main_loop_t)();
-	typedef void (*qemu_cleanup_t)();
+    /* QEMU 11 uses qemu_init(argc, argv), qemu_main_loop() -> int,
+     * and qemu_cleanup(status). Keep the legacy main fallback for old QEMU. */
+    typedef void (*qemu_init_t)(int argc, char **argv);
+    typedef int (*qemu_main_loop_t)(void);
+    typedef void (*qemu_cleanup_t)(int status);
+    typedef int (*qemu_legacy_main_t)(int argc, char **argv, char **envp);
 
     qemu_main_loop_t qemu_main_loop = NULL;
     qemu_cleanup_t qemu_cleanup = NULL;
 
 	dlerror();
-	main_t qemu_main = (main_t) dlsym(handle, "qemu_init");
+	qemu_init_t qemu_init_fn = (qemu_init_t) dlsym(handle, "qemu_init");
 	const char *dlsym_error = dlerror();
 	if (dlsym_error) { //older versions of qemu
 		LOGE("Cannot find qemu symbol 'qemu_init' trying 'main': %s\n", dlsym_error);
-	    qemu_main = (main_t) dlsym(handle, "main");
+	    qemu_legacy_main_t qemu_legacy_main = (qemu_legacy_main_t) dlsym(handle, "main");
 	    dlsym_error = dlerror();
 	    if (dlsym_error) {
         	LOGE("Cannot find qemu symbol 'qemu_init' or 'main': %s\n", dlsym_error);
@@ -239,7 +242,7 @@ JNIEXPORT jstring JNICALL Java_com_max2idea_android_limbo_jni_VMExecutor_start(
         	handle = NULL;
         	return (*env)->NewStringUTF(env, dlsym_error);
         }
-        qemu_main(argc, argv, NULL);
+        qemu_legacy_main(argc, argv, NULL);
     } else { // new versions of qemu
         qemu_main_loop = (qemu_main_loop_t) dlsym(handle, "qemu_main_loop");
 	    dlsym_error = dlerror();
@@ -259,9 +262,9 @@ JNIEXPORT jstring JNICALL Java_com_max2idea_android_limbo_jni_VMExecutor_start(
         	return (*env)->NewStringUTF(env, dlsym_error);
         }
 
-        qemu_main(argc, argv, NULL);
-        qemu_main_loop();
-        qemu_cleanup();
+        qemu_init_fn(argc, argv);
+        int qemu_status = qemu_main_loop();
+        qemu_cleanup(qemu_status);
 	}
 
 	sprintf(res_msg, "Closing lib: %s", lib_path_str);
