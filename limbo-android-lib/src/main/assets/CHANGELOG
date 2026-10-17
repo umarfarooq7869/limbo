@@ -1,3 +1,8 @@
+Limbo Android modernization (CI source build)
+- Added automatic OVMF UEFI firmware selection for x86-64 guests when firmware is installed.
+- Each VM receives its own persistent OVMF variable store; custom -bios/pflash parameters retain precedence.
+- GitHub Actions builds native QEMU dependencies and APKs for the configured Android host ABI.
+
 * Limbo Legacy v6.0.1
 Added qemu disk cache option
 Added qemu hdd interfaces (tap on the disk icon)
