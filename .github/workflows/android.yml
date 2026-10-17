@@ -49,7 +49,7 @@ jobs:
             autoconf automake autopoint bc bison build-essential ca-certificates \
             flex gettext git libtool libtool-bin make nasm ninja-build \
             patch pkg-config python3 rsync texinfo unzip wget xz-utils zlib1g-dev \
-            ovmf
+            ovmf gtk-doc-tools
 
       # Gradle 7.0.2 supports running on JDK 17; keep JDK 17 to avoid sdkmanager switching back to JDK 11.
       - name: Install Gradle
