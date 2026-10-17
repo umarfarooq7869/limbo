@@ -14,7 +14,7 @@ changes = []
 def edit(rel, old, new, label, count=1):
     p = root / rel
     text = p.read_text()
-    if label in text:
+    if label in text or new in text:
         return
     found = text.count(old)
     if found != count:
@@ -125,6 +125,17 @@ edit("ui/sdl2.c",
         SDL_LogSetAllPriority(SDL_LOG_PRIORITY_VERBOSE);
     }
 """, "sdl-scale-quality-hint")
+
+# Declare the existing Limbo JNI callback when building QEMU with Limbo hooks.
+edit("ui/sdl2-2d.c",
+"""#include "ui/sdl2.h"
+""",
+"""#include "ui/sdl2.h"
+
+#ifdef __LIMBO__
+extern void Android_JNI_SetVMResolution(int width, int height);
+#endif
+""", "jni-resolution-callback-declaration")
 
 # Notify Java of guest resolution changes through the project's existing JNI hook.
 edit("ui/sdl2-2d.c",
