@@ -42,6 +42,9 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 
@@ -167,6 +170,7 @@ private String getQemuLibrary() {
         addAudioOptions(paramsList);
         addNetworkOptions(paramsList);
         addGenericOptions(context, paramsList);
+        addUefiOptions(paramsList);
         addStateOptions(paramsList);
         addAdvancedOptions(paramsList);
         addAccelerationOptions(paramsList);
@@ -238,11 +242,86 @@ private String getQemuLibrary() {
         }
     }
 
+    /**
+     * Enable 64-bit OVMF for the x86_64 QEMU target by default when firmware is
+     * installed. A user-supplied BIOS/pflash configuration takes precedence,
+     * which keeps legacy BIOS guests and custom firmware configurations usable.
+     */
+    private void addUefiOptions(ArrayList<String> paramsList) {
+        // LimboApplication.arch identifies this app's QEMU target. OVMF_CODE.fd
+        // is 64-bit firmware; do not inject it into the 32-bit i386 QEMU target.
+        // Machine.arch is a machine family string and does not indicate QEMU width.
+        if (LimboApplication.arch != Config.Arch.x86_64) {
+            return;
+        }
+
+        String extra = getMachine().getExtraParams();
+        if (extra != null) {
+            String lower = extra.toLowerCase(java.util.Locale.ROOT);
+            if (lower.contains("--limbo-uefi=off") || lower.contains("-bios")
+                    || lower.contains("if=pflash") || lower.contains("-pflash")) {
+                return;
+            }
+        }
+
+        File firmwareDir = new File(LimboApplication.getBasefileDir());
+        File code = new File(firmwareDir, "OVMF_CODE.fd");
+        File varsTemplate = new File(firmwareDir, "OVMF_VARS.fd");
+        if (!code.isFile() || !varsTemplate.isFile()) {
+            Log.w(TAG, "OVMF firmware is not installed; using the default legacy BIOS");
+            return;
+        }
+
+        File varsDir = new File(LimboApplication.getMachineDir());
+        if (!varsDir.exists() && !varsDir.mkdirs()) {
+            Log.e(TAG, "Cannot create per-machine UEFI variable directory: " + varsDir);
+            return;
+        }
+        String safeName = getMachine().getName();
+        if (safeName == null || safeName.trim().isEmpty()) safeName = "default";
+        safeName = safeName.replaceAll("[^A-Za-z0-9._-]", "_");
+        File vars = new File(varsDir, safeName + ".OVMF_VARS.fd");
+        if (!vars.isFile()) {
+            try {
+                copyFile(varsTemplate, vars);
+            } catch (IOException e) {
+                Log.e(TAG, "Cannot initialize per-machine OVMF variables; using legacy BIOS", e);
+                return;
+            }
+        }
+
+        paramsList.add("-drive");
+        paramsList.add("if=pflash,format=raw,readonly=on,file=" + code.getAbsolutePath());
+        paramsList.add("-drive");
+        paramsList.add("if=pflash,format=raw,file=" + vars.getAbsolutePath());
+        Log.i(TAG, "UEFI enabled by default for x86_64 QEMU target");
+    }
+
+    private static void copyFile(File source, File destination) throws IOException {
+        FileInputStream input = new FileInputStream(source);
+        try {
+            FileOutputStream output = new FileOutputStream(destination);
+            try {
+                byte[] buffer = new byte[16384];
+                int count;
+                while ((count = input.read(buffer)) != -1) output.write(buffer, 0, count);
+                output.getFD().sync();
+            } finally {
+                output.close();
+            }
+        } finally {
+            input.close();
+        }
+    }
+
     private void addAdvancedOptions(ArrayList<String> paramsList) {
 
         if (getMachine().getExtraParams() != null && !getMachine().getExtraParams().trim().equals("")) {
-            String[] paramsTmp = getMachine().getExtraParams().split(" ");
-            paramsList.addAll(Arrays.asList(paramsTmp));
+            String[] paramsTmp = getMachine().getExtraParams().trim().split("\\s+");
+            for (String param : paramsTmp) {
+                // Limbo-only compatibility switch; do not pass this token to QEMU.
+                if (!"--limbo-uefi=off".equalsIgnoreCase(param)) paramsList.add(param);
+            }
         }
     }
 
