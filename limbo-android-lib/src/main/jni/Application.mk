@@ -5,6 +5,12 @@ include $(LIMBO_JNI_ROOT)/android-limbo-build.mak
 #Suppress Format errors from logutils.h macros
 APP_CFLAGS += -Wno-format-security
 
+# QEMU 11 changed qemu_init/qemu_main_loop/qemu_cleanup signatures.
+# This define is enabled only by the QEMU 11 Android build path.
+ifeq ($(USE_QEMU_VERSION),11.1.2)
+    APP_CFLAGS += -DLIMBO_QEMU_11
+endif
+
 #Debug/Release
 ifeq ($(NDK_DEBUG),1)
     APP_OPTIM := debug

@@ -219,50 +219,66 @@ JNIEXPORT jstring JNICALL Java_com_max2idea_android_limbo_jni_VMExecutor_start(
 	setup_jni(env, thiz, storage_dir, base_dir);
     set_qemu_var(env, thiz, "limbo_sdl_scale_hint", sdl_scale_hint);
 
-	typedef void (*main_t)(int argc, char **argv, char **envp);
-    typedef void (*qemu_main_loop_t)();
-	typedef void (*qemu_cleanup_t)();
+    /* QEMU 5.1 and QEMU 11 have different qemu_init/qemu_cleanup ABIs.
+     * Keep the default build compatible with the existing 5.1.0 workflow;
+     * define LIMBO_QEMU_11 only for the new Android port build. */
+#ifdef LIMBO_QEMU_11
+    typedef void (*qemu_init_t)(int argc, char **argv);
+    typedef int (*qemu_main_loop_t)(void);
+    typedef void (*qemu_cleanup_t)(int status);
+#else
+    typedef void (*qemu_init_t)(int argc, char **argv, char **envp);
+    typedef void (*qemu_main_loop_t)(void);
+    typedef void (*qemu_cleanup_t)(void);
+#endif
+    typedef int (*qemu_legacy_main_t)(int argc, char **argv, char **envp);
 
     qemu_main_loop_t qemu_main_loop = NULL;
     qemu_cleanup_t qemu_cleanup = NULL;
 
-	dlerror();
-	main_t qemu_main = (main_t) dlsym(handle, "qemu_init");
-	const char *dlsym_error = dlerror();
-	if (dlsym_error) { //older versions of qemu
-		LOGE("Cannot find qemu symbol 'qemu_init' trying 'main': %s\n", dlsym_error);
-	    qemu_main = (main_t) dlsym(handle, "main");
-	    dlsym_error = dlerror();
-	    if (dlsym_error) {
-        	LOGE("Cannot find qemu symbol 'qemu_init' or 'main': %s\n", dlsym_error);
-        	dlclose(handle);
-        	handle = NULL;
-        	return (*env)->NewStringUTF(env, dlsym_error);
+    dlerror();
+    qemu_init_t qemu_init_fn = (qemu_init_t) dlsym(handle, "qemu_init");
+    const char *dlsym_error = dlerror();
+    if (dlsym_error) { // older versions exporting only main
+        LOGE("Cannot find qemu symbol 'qemu_init' trying 'main': %s\\n", dlsym_error);
+        qemu_legacy_main_t qemu_legacy_main = (qemu_legacy_main_t) dlsym(handle, "main");
+        dlsym_error = dlerror();
+        if (dlsym_error) {
+            LOGE("Cannot find qemu symbol 'qemu_init' or 'main': %s\\n", dlsym_error);
+            dlclose(handle);
+            handle = NULL;
+            return (*env)->NewStringUTF(env, dlsym_error);
         }
-        qemu_main(argc, argv, NULL);
-    } else { // new versions of qemu
+        qemu_legacy_main(argc, argv, NULL);
+    } else {
         qemu_main_loop = (qemu_main_loop_t) dlsym(handle, "qemu_main_loop");
-	    dlsym_error = dlerror();
-	    if (dlsym_error) {
-        	LOGE("Cannot find qemu symbol 'qemu_main_loop': %s\n", dlsym_error);
-        	dlclose(handle);
-        	handle = NULL;
-        	return (*env)->NewStringUTF(env, dlsym_error);
+        dlsym_error = dlerror();
+        if (dlsym_error) {
+            LOGE("Cannot find qemu symbol 'qemu_main_loop': %s\\n", dlsym_error);
+            dlclose(handle);
+            handle = NULL;
+            return (*env)->NewStringUTF(env, dlsym_error);
         }
 
         qemu_cleanup = (qemu_cleanup_t) dlsym(handle, "qemu_cleanup");
-	    dlsym_error = dlerror();
-	    if (dlsym_error) {
-        	LOGE("Cannot find qemu symbol 'qemu_cleanup': %s\n", dlsym_error);
-        	dlclose(handle);
-        	handle = NULL;
-        	return (*env)->NewStringUTF(env, dlsym_error);
+        dlsym_error = dlerror();
+        if (dlsym_error) {
+            LOGE("Cannot find qemu symbol 'qemu_cleanup': %s\\n", dlsym_error);
+            dlclose(handle);
+            handle = NULL;
+            return (*env)->NewStringUTF(env, dlsym_error);
         }
 
-        qemu_main(argc, argv, NULL);
+#ifdef LIMBO_QEMU_11
+        qemu_init_fn(argc, argv);
+        int qemu_status = qemu_main_loop();
+        qemu_cleanup(qemu_status);
+#else
+        qemu_init_fn(argc, argv, NULL);
         qemu_main_loop();
         qemu_cleanup();
-	}
+#endif
+    }
 
 	sprintf(res_msg, "Closing lib: %s", lib_path_str);
 	LOGV("%s", res_msg);

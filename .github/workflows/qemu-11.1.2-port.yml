@@ -1,0 +1,213 @@
+name: QEMU 11.1.2 port smoke test
+
+on:
+  push:
+    branches:
+      - port/qemu-11.1.2
+    paths:
+      - '.github/workflows/qemu-11.1.2-port.yml'
+      - 'QEMU-11.1.2-PORTING.md'
+      - 'scripts/patch-qemu-11-android-shared.py'
+      - 'scripts/patch-qemu-11-limbo-android.py'
+      - 'limbo-android-lib/src/main/jni/**'
+  pull_request:
+    branches:
+      - master
+    paths:
+      - '.github/workflows/qemu-11.1.2-port.yml'
+      - 'QEMU-11.1.2-PORTING.md'
+      - 'limbo-android-lib/src/main/jni/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qemu-11-port-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  upstream-target-smoke-test:
+    name: QEMU 11.1.2 target/build smoke test (Linux host)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - name: Install QEMU build dependencies
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential ca-certificates curl git libglib2.0-dev \
+            libpixman-1-dev libfdt-dev libslirp-dev ninja-build pkg-config \
+            python3 python3-venv python3-pip python3-setuptools python3-wheel \
+            zlib1g-dev
+
+      - name: Download and verify QEMU source archive
+        run: |
+          set -euxo pipefail
+          curl --fail --location --retry 3 \
+            https://download.qemu.org/qemu-11.1.2.tar.xz \
+            --output /tmp/qemu-11.1.2.tar.xz
+          tar -tJf /tmp/qemu-11.1.2.tar.xz > /tmp/qemu-archive-files.txt
+          grep -q '^qemu-11.1.2/' /tmp/qemu-archive-files.txt
+          tar -xJf /tmp/qemu-11.1.2.tar.xz -C "$RUNNER_TEMP"
+
+      - name: Configure modern QEMU build system
+        working-directory: ${{ runner.temp }}/qemu-11.1.2
+        run: |
+          set -euxo pipefail
+          ./configure \
+            --target-list=x86_64-softmmu,aarch64-softmmu,ppc64-softmmu,sparc-softmmu \
+            --disable-docs \
+            --disable-werror
+
+      - name: Build the four guest system targets
+        working-directory: ${{ runner.temp }}/qemu-11.1.2
+        run: |
+          set -euxo pipefail
+          make -j2
+
+      - name: Verify target binaries and version
+        working-directory: ${{ runner.temp }}/qemu-11.1.2
+        run: |
+          set -euxo pipefail
+          # QEMU 11.1.2's configure wrapper creates the Meson/Ninja build tree
+          # under ./build; emulator executables are emitted there, not in the source root.
+          test -x ./build/qemu-system-x86_64
+          ./build/qemu-system-x86_64 --version | grep -F 'QEMU emulator version 11.1.2'
+          test -x ./build/qemu-system-aarch64
+          test -x ./build/qemu-system-ppc64
+          test -x ./build/qemu-system-sparc
+
+      - name: Upload configure summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qemu-11.1.2-upstream-smoke-test
+          path: ${{ runner.temp }}/qemu-11.1.2/build/config.log
+          if-no-files-found: warn
+          retention-days: 14
+
+  limbo-shared-library-smoke-test:
+    name: Experimental Limbo shared-library target (Linux host)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - name: Check out Limbo porting scripts
+        uses: actions/checkout@v4
+
+      - name: Install QEMU build dependencies
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential ca-certificates curl git libglib2.0-dev \
+            libpixman-1-dev libfdt-dev libslirp-dev ninja-build pkg-config \
+            python3 python3-venv python3-pip python3-setuptools python3-wheel \
+            zlib1g-dev
+
+      - name: Download QEMU 11.1.2 and add experimental Limbo shared target
+        run: |
+          set -euxo pipefail
+          curl --fail --location --retry 3 \
+            https://download.qemu.org/qemu-11.1.2.tar.xz \
+            --output /tmp/qemu-11.1.2.tar.xz
+          tar -xJf /tmp/qemu-11.1.2.tar.xz -C "$RUNNER_TEMP"
+          python3 scripts/patch-qemu-11-android-shared.py "$RUNNER_TEMP/qemu-11.1.2"
+          python3 scripts/patch-qemu-11-limbo-android.py "$RUNNER_TEMP/qemu-11.1.2"
+
+      - name: Configure shared-library experiment with PIC objects
+        working-directory: ${{ runner.temp }}/qemu-11.1.2
+        run: |
+          set -euxo pipefail
+          mkdir "$RUNNER_TEMP/qemu-limbo-build"
+          cd "$RUNNER_TEMP/qemu-limbo-build"
+          "$RUNNER_TEMP/qemu-11.1.2/configure" \
+            --target-list=x86_64-softmmu \
+            --disable-docs \
+            --disable-werror \
+            -Dlimbo_android_shared_library=true \
+            -Db_staticpic=true \
+            -Dc_args=-D__LIMBO__
+
+      - name: Build shared library
+        working-directory: ${{ runner.temp }}/qemu-limbo-build
+        run: |
+          set -euxo pipefail
+          ninja -j2
+          test -s libqemu-system-x86_64.so
+
+      - name: Verify Limbo JNI entry points are exported
+        working-directory: ${{ runner.temp }}/qemu-limbo-build
+        run: |
+          set -euxo pipefail
+          nm -D --defined-only libqemu-system-x86_64.so > exported-symbols.txt
+          grep -Eq '[[:space:]]qemu_init$' exported-symbols.txt
+          grep -Eq '[[:space:]]qemu_main_loop$' exported-symbols.txt
+          grep -Eq '[[:space:]]qemu_cleanup$' exported-symbols.txt
+          readelf -h libqemu-system-x86_64.so | grep -F 'DYN (Shared object file)'
+          file libqemu-system-x86_64.so
+
+      - name: Upload shared-library experiment diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qemu-11.1.2-limbo-shared-library-diagnostics
+          path: |
+            ${{ runner.temp }}/qemu-limbo-build/meson-logs/meson-log.txt
+            ${{ runner.temp }}/qemu-limbo-build/config.log
+            ${{ runner.temp }}/qemu-limbo-build/exported-symbols.txt
+          if-no-files-found: warn
+          retention-days: 14
+
+
+  android-ndk-jni-abi-smoke-test:
+    name: Android NDK arm64 JNI bridge compile (QEMU 11 ABI)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out Limbo porting branch
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17 for Android command-line tools
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Android NDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'ndk;27.2.12479018'
+
+      - name: Compile the Limbo JNI bridge for Android arm64
+        shell: bash
+        run: |
+          set -euxo pipefail
+          NDK="$ANDROID_HOME/ndk/27.2.12479018"
+          test -x "$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang"
+          JNI_ROOT="$GITHUB_WORKSPACE/limbo-android-lib/src/main/jni"
+          "$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang" \
+            -fPIC -c -DLIMBO_QEMU_11 -D__LIMBO__ -D__ANDROID__ -DANDROID -D__linux__ \
+            -Wno-format-security \
+            -I"$NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include" \
+            -I"$JNI_ROOT" -I"$JNI_ROOT/limbo" -I"$JNI_ROOT/compat" \
+            "$JNI_ROOT/limbo/vm-executor-jni.c" \
+            -o "$RUNNER_TEMP/vm-executor-jni-arm64.o"
+          "$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm" \
+            --defined-only "$RUNNER_TEMP/vm-executor-jni-arm64.o" > "$RUNNER_TEMP/jni-symbols.txt"
+          grep -F 'Java_com_max2idea_android_limbo_jni_VMExecutor_start' "$RUNNER_TEMP/jni-symbols.txt"
+          grep -F 'Java_com_max2idea_android_limbo_jni_VMExecutor_nativeRefreshScreen' "$RUNNER_TEMP/jni-symbols.txt"
+          grep -F 'Java_com_max2idea_android_limbo_jni_VMExecutor_setSDLRefreshRateDefault' "$RUNNER_TEMP/jni-symbols.txt"
+          grep -F 'Java_com_max2idea_android_limbo_jni_VMExecutor_nativeIgnoreBreakpointInvalidate' "$RUNNER_TEMP/jni-symbols.txt"
+
+      - name: Upload Android JNI compile diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qemu-11-android-jni-arm64-diagnostics
+          path: |
+            \${{ runner.temp }}/vm-executor-jni-arm64.o
+            \${{ runner.temp }}/jni-symbols.txt
+          if-no-files-found: warn
+          retention-days: 14
