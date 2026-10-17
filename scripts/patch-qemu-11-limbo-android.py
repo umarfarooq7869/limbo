@@ -140,6 +140,73 @@ void sdl2_2d_refresh""",
 
 void sdl2_2d_refresh""", "sdl-resolution-callback")
 
+# Avoid a null SDL console when pointer events arrive during window teardown.
+edit("ui/sdl2.c",
+"""static void sdl_send_mouse_event(struct sdl2_console *scon, int dx, int dy,
+                                 int x, int y, int state)
+{
+""",
+"""static void sdl_send_mouse_event(struct sdl2_console *scon, int dx, int dy,
+                                 int x, int y, int state)
+{
+#ifdef __LIMBO__
+    if (!scon) {
+        return;
+    }
+#endif
+""", "sdl-null-mouse-console")
+
+# Android keyboards may send punctuation keysyms without the required Shift event.
+edit("ui/vnc.c",
+"""static void key_event(VncState *vs, bool down, uint32_t sym)
+{
+""",
+"""#ifdef __ANDROID__
+static bool limbo_vnc_key_needs_shift(VncState *vs, bool down,
+                                      uint32_t sym, uint16_t keycode)
+{
+    const uint32_t shift_sym = 65505;
+    const uint16_t shift_keycode = 42;
+
+    if ((sym >= 123 && sym <= 126) ||
+        (sym >= 33 && sym <= 38) ||
+        (sym >= 40 && sym < 44) ||
+        (sym >= 62 && sym <= 64) ||
+        (sym >= 94 && sym <= 95) ||
+        sym == 58 || sym == 60) {
+        if (sym == 60) {
+            sym = 44;
+            keycode = 51;
+        }
+        if (down) {
+            do_key_event(vs, true, shift_keycode, shift_sym);
+        }
+        do_key_event(vs, down, keycode, sym);
+        if (!down) {
+            do_key_event(vs, false, shift_keycode, shift_sym);
+        }
+        return true;
+    }
+    return false;
+}
+#endif
+
+static void key_event(VncState *vs, bool down, uint32_t sym)
+{
+""", "android-vnc-shift-helper")
+edit("ui/vnc.c",
+"""    trace_vnc_key_event_map(down, sym, keycode, code2name(keycode));
+    do_key_event(vs, down, keycode, sym);
+""",
+"""    trace_vnc_key_event_map(down, sym, keycode, code2name(keycode));
+#ifdef __ANDROID__
+    if (limbo_vnc_key_needs_shift(vs, down, sym, keycode)) {
+        return;
+    }
+#endif
+    do_key_event(vs, down, keycode, sym);
+""", "android-vnc-shift-dispatch")
+
 # VNC refresh controls are accessed by JNI by symbol name.
 edit("ui/vnc.c",
 """#define VNC_REFRESH_INTERVAL_BASE GUI_REFRESH_INTERVAL_DEFAULT
