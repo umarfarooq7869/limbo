@@ -159,3 +159,50 @@ jobs:
             ${{ runner.temp }}/qemu-limbo-build/exported-symbols.txt
           if-no-files-found: warn
           retention-days: 14
+
+
+  android-ndk-jni-abi-smoke-test:
+    name: Android NDK arm64 JNI bridge compile (QEMU 11 ABI)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out Limbo porting branch
+        uses: actions/checkout@v4
+
+      - name: Install Android NDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: ''
+          ndk-version: 27.2.12479018
+
+      - name: Compile the Limbo JNI bridge for Android arm64
+        shell: bash
+        run: |
+          set -euxo pipefail
+          NDK="$ANDROID_HOME/ndk/27.2.12479018"
+          test -x "$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang"
+          JNI_ROOT="$GITHUB_WORKSPACE/limbo-android-lib/src/main/jni"
+          "$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang" \
+            -fPIC -c -DLIMBO_QEMU_11 -D__LIMBO__ -D__ANDROID__ -DANDROID -D__linux__ \
+            -Wno-format-security \
+            -I"$NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include" \
+            -I"$JNI_ROOT" -I"$JNI_ROOT/limbo" -I"$JNI_ROOT/compat" \
+            "$JNI_ROOT/limbo/vm-executor-jni.c" \
+            -o "$RUNNER_TEMP/vm-executor-jni-arm64.o"
+          "$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm" \
+            --defined-only "$RUNNER_TEMP/vm-executor-jni-arm64.o" > "$RUNNER_TEMP/jni-symbols.txt"
+          grep -F 'Java_com_max2idea_android_limbo_jni_VMExecutor_start' "$RUNNER_TEMP/jni-symbols.txt"
+          grep -F 'Java_com_max2idea_android_limbo_jni_VMExecutor_nativeRefreshScreen' "$RUNNER_TEMP/jni-symbols.txt"
+          grep -F 'Java_com_max2idea_android_limbo_jni_VMExecutor_setSDLRefreshRateDefault' "$RUNNER_TEMP/jni-symbols.txt"
+          grep -F 'Java_com_max2idea_android_limbo_jni_VMExecutor_nativeIgnoreBreakpointInvalidate' "$RUNNER_TEMP/jni-symbols.txt"
+
+      - name: Upload Android JNI compile diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qemu-11-android-jni-arm64-diagnostics
+          path: |
+            \${{ runner.temp }}/vm-executor-jni-arm64.o
+            \${{ runner.temp }}/jni-symbols.txt
+          if-no-files-found: warn
+          retention-days: 14
