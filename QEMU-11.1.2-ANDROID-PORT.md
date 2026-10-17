@@ -32,3 +32,23 @@ The current QEMU 5.1.0 patch supplies or modifies several Limbo-specific symbols
 ## Safety rule
 
 Do not change the production Android workflow's QEMU version until these gates pass. A successful Linux upstream build or an APK built against QEMU 5.1.0 is not evidence that QEMU 11 is working in Limbo.
+
+## Ported Android-specific changes (QEMU 11.1.2)
+
+The version-specific source patcher is `scripts/patch-qemu-11-limbo-android.py`. It applies guarded edits to QEMU 11.1.2 for:
+
+- JNI-adjustable SDL refresh intervals and VNC refresh intervals.
+- A full VGA refresh request triggered by Limbo's existing JNI variable.
+- SDL renderer selection (software/hardware), render scaling hint, and guest-resolution callback.
+- A null-console guard around SDL pointer events.
+- Android VNC keyboard punctuation that requires synthesized Shift events.
+- Android audio default frequency (22.05 kHz).
+- Android mmap constants and a KVM error message that avoids glibc's `%m` format extension.
+
+The CI workflow now applies this patcher before compiling the experimental shared-library target with `__LIMBO__` enabled. This is an early Linux-host integration check; the Android-only VNC and Bionic code paths still require an NDK cross-build.
+
+## Known patch items not yet ported or proven
+
+- The QEMU 5.1 breakpoint-invalidation hook has no confirmed one-to-one equivalent in the QEMU 11 source layout. The JNI variable is not yet implemented for QEMU 11; do not rely on that tuning option until it is ported deliberately.
+- The old monitor file-descriptor workaround and the old configure-time feature overrides were not copied blindly because QEMU 11 moved to Meson and changed those subsystems. Each must be checked against the actual Android NDK/API level during cross-compilation.
+- SDL display behavior, VNC keyboard mapping, audio, and KVM diagnostics have not yet been validated on a physical Android device.
