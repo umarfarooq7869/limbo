@@ -2,7 +2,31 @@ name: Android APKs (native QEMU + OVMF)
 
 on:
   push:
+    paths:
+      - '.github/workflows/android.yml'
+      - 'build.gradle'
+      - 'settings.gradle'
+      - 'gradle.properties'
+      - 'gradle/**'
+      - '**/*.gradle'
+      - 'limbo-android-lib/**'
+      - 'limbo-android-x86/**'
+      - 'limbo-android-arm/**'
+      - 'limbo-android-ppc/**'
+      - 'limbo-android-sparc/**'
   pull_request:
+    paths:
+      - '.github/workflows/android.yml'
+      - 'build.gradle'
+      - 'settings.gradle'
+      - 'gradle.properties'
+      - 'gradle/**'
+      - '**/*.gradle'
+      - 'limbo-android-lib/**'
+      - 'limbo-android-x86/**'
+      - 'limbo-android-arm/**'
+      - 'limbo-android-ppc/**'
+      - 'limbo-android-sparc/**'
   workflow_dispatch:
 
 permissions:
