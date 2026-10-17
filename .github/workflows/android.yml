@@ -32,6 +32,9 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # The legacy 'tools' package is no longer published by sdkmanager.
+          packages: 'platform-tools'
 
       # This project uses Gradle 7.0.2, which should run on Java 11.
       - name: Set up Java 11 for Gradle build
