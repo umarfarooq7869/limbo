@@ -51,7 +51,14 @@ jobs:
             patch pkg-config python3 rsync texinfo unzip wget xz-utils zlib1g-dev \
             ovmf gtk-doc-tools
 
-      # Gradle 7.0.2 supports running on JDK 17; keep JDK 17 to avoid sdkmanager switching back to JDK 11.
+      # Gradle 7.0.2's bundled Groovy/ASM cannot parse Java 17 class files (major version 61).
+      # SDK installation is complete, so switch to JDK 11 for this legacy Android build.
+      - name: Set up Java 11 for legacy Gradle
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11'
+
       - name: Install Gradle
         run: |
           curl --fail --location --retry 3 \
