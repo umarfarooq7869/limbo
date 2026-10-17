@@ -36,19 +36,14 @@ jobs:
           # The legacy 'tools' package is no longer published by sdkmanager.
           packages: 'platform-tools'
 
-      # This project uses Gradle 7.0.2, which should run on Java 11.
-      - name: Set up Java 11 for Gradle build
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '11'
-          cache: gradle
-
+      # Keep JDK 17 active for every sdkmanager invocation.
       - name: Install Android SDK packages and native build tools
         run: |
+          set -euxo pipefail
+          java -version
           sdkmanager --sdk_root="$ANDROID_SDK_ROOT" \
             "platform-tools" "platforms;android-29" "build-tools;29.0.3" "ndk;23.1.7779620"
-          yes | sdkmanager --licenses
+          yes | sdkmanager --sdk_root="$ANDROID_SDK_ROOT" --licenses
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             autoconf automake autopoint bc bison build-essential ca-certificates \
@@ -56,6 +51,7 @@ jobs:
             patch pkg-config python3 rsync texinfo unzip wget xz-utils zlib1g-dev \
             ovmf
 
+      # Gradle 7.0.2 supports running on JDK 17; keep JDK 17 to avoid sdkmanager switching back to JDK 11.
       - name: Install Gradle
         run: |
           curl --fail --location --retry 3 \
