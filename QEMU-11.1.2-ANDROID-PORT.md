@@ -6,7 +6,7 @@ The Linux smoke test proves that upstream QEMU 11.1.2 configures and builds its 
 
 ## Required native-library contract
 
-The Android port must produce one compatible `libqemu-system-<guest>.so` for each guest target that the app exposes, for the selected Android host ABI. The JNI bridge currently expects:
+The Android port must produce one compatible `libqemu-system-<guest>.so` for each guest target that the app exposes, for the selected Android host ABI. The JNI bridge expects the following symbols. The QEMU 11 branch now also updates the bridge's function-pointer signatures to call `qemu_init(argc, argv)`, capture the `qemu_main_loop()` status, and pass it to `qemu_cleanup(status)`, while retaining the legacy `main` fallback:
 
 - `qemu_init` (with the legacy `main` fallback)
 - `qemu_main_loop`
@@ -22,8 +22,8 @@ The current QEMU 5.1.0 patch supplies or modifies several Limbo-specific symbols
 
 ## APK integration gates
 
-1. Cross-compile QEMU 11.1.2 and its required libraries with the Android NDK for the intended host ABI.
-2. Build a shared-library target (not just the upstream executable) and verify the required JNI symbols using the NDK's `llvm-nm`.
+1. Cross-compile QEMU 11.1.2 and its required libraries with the Android NDK for the intended host ABI. QEMU 11 requires an updated GLib/Pixman/SDL dependency strategy; the current QEMU 5.1 dependency pins are not assumed compatible.
+2. Adapt the QEMU 11 Meson target to emit a Limbo-loadable shared library (not just the upstream executable) and verify the required JNI symbols using the NDK's `llvm-nm`.
 3. Port the Android compatibility and display/input changes from `qemu-5.1.0.patch` as a version-specific QEMU 11 patch.
 4. Stage the shared libraries and QEMU 11 firmware/ROM/keymap assets into the existing Gradle modules.
 5. Build all four APKs and inspect each APK's native libraries and assets.
