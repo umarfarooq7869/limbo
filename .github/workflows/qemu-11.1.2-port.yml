@@ -46,7 +46,8 @@ jobs:
           curl --fail --location --retry 3 \
             https://download.qemu.org/qemu-11.1.2.tar.xz \
             --output /tmp/qemu-11.1.2.tar.xz
-          tar -tJf /tmp/qemu-11.1.2.tar.xz | head -n 1 | grep -q '^qemu-11.1.2/'
+          tar -tJf /tmp/qemu-11.1.2.tar.xz > /tmp/qemu-archive-files.txt
+          grep -q '^qemu-11.1.2/' /tmp/qemu-archive-files.txt
           tar -xJf /tmp/qemu-11.1.2.tar.xz -C "$RUNNER_TEMP"
 
       - name: Configure modern QEMU build system
