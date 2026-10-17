@@ -1,0 +1,138 @@
+name: Android APKs (native QEMU + OVMF)
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    env:
+      ANDROID_NDK_HOME: ${{ github.workspace }}/android-sdk/ndk/23.1.7779620
+      ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11'
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages and native build tools
+        run: |
+          sdkmanager --sdk_root="$ANDROID_SDK_ROOT" \
+            "platform-tools" "platforms;android-29" "build-tools;29.0.3" "ndk;23.1.7779620"
+          yes | sdkmanager --licenses
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            autoconf automake autopoint bc bison build-essential ca-certificates \
+            flex gettext git libtool libtool-bin make nasm ninja-build \
+            patch pkg-config python3 rsync texinfo unzip wget xz-utils zlib1g-dev \
+            ovmf
+
+      - name: Install Gradle
+        run: |
+          curl --fail --location --retry 3 \
+            https://services.gradle.org/distributions/gradle-7.0.2-bin.zip \
+            --output /tmp/gradle.zip
+          unzip -q /tmp/gradle.zip -d /tmp
+
+      - name: Download pinned native dependency sources
+        working-directory: limbo-android-lib/src/main/jni
+        run: |
+          set -euxo pipefail
+          curl --fail --location --retry 3 https://download.qemu.org/qemu-5.1.0.tar.xz -o /tmp/qemu.tar.xz
+          tar -xJf /tmp/qemu.tar.xz -C /tmp
+          mv /tmp/qemu-5.1.0 qemu
+
+          curl --fail --location --retry 3 https://ftp.gnome.org/pub/GNOME/sources/glib/2.56/glib-2.56.1.tar.xz -o /tmp/glib.tar.xz
+          tar -xJf /tmp/glib.tar.xz -C /tmp
+          mv /tmp/glib-2.56.1 glib
+
+          curl --fail --location --retry 3 https://sourceware.org/pub/libffi/libffi-3.3.tar.gz -o /tmp/libffi.tar.gz
+          tar -xzf /tmp/libffi.tar.gz -C /tmp
+          mv /tmp/libffi-3.3 libffi
+
+          curl --fail --location --retry 3 https://www.cairographics.org/releases/pixman-0.40.0.tar.gz -o /tmp/pixman.tar.gz
+          tar -xzf /tmp/pixman.tar.gz -C /tmp
+          mv /tmp/pixman-0.40.0 pixman
+
+          curl --fail --location --retry 3 https://www.libsdl.org/release/SDL2-2.0.8.tar.gz -o /tmp/sdl.tar.gz
+          tar -xzf /tmp/sdl.tar.gz -C /tmp
+          mv /tmp/SDL2-2.0.8 SDL2
+
+          patch -d qemu -p1 < patches/qemu-5.1.0.patch
+          patch -d glib -p1 < patches/glib-2.56.1.patch
+          patch -d SDL2 -p1 < patches/sdl2-2.0.8.patch
+
+      - name: Build native QEMU and supporting libraries
+        working-directory: limbo-android-lib/src/main/jni
+        env:
+          NDK_ROOT: ${{ github.workspace }}/android-sdk/ndk/23.1.7779620
+          NDK_ENV: linux-x86_64
+          BUILD_HOST: arm64-v8a
+          BUILD_GUEST: x86_64-softmmu,aarch64-softmmu,ppc64-softmmu,sparc-softmmu
+          USE_QEMU_VERSION: 5.1.0
+          BUILD_THREADS: 2
+          USE_GCC: 'false'
+        run: |
+          set -euxo pipefail
+          make limbo
+
+      - name: Package OVMF firmware assets
+        run: |
+          set -euxo pipefail
+          mkdir -p limbo-android-lib/src/main/assets/roms
+          test -s /usr/share/OVMF/OVMF_CODE.fd
+          test -s /usr/share/OVMF/OVMF_VARS.fd
+          install -m 0644 /usr/share/OVMF/OVMF_CODE.fd limbo-android-lib/src/main/assets/roms/OVMF_CODE.fd
+          install -m 0644 /usr/share/OVMF/OVMF_VARS.fd limbo-android-lib/src/main/assets/roms/OVMF_VARS.fd
+          test -s /usr/share/doc/ovmf/copyright
+          mkdir -p limbo-android-lib/src/main/assets/licenses
+          cp /usr/share/doc/ovmf/copyright limbo-android-lib/src/main/assets/licenses/OVMF-LICENSE.txt
+
+      - name: Build Android APKs
+        run: |
+          set -euxo pipefail
+          /tmp/gradle-7.0.2/bin/gradle --no-daemon --stacktrace \
+            :limbo-android-x86:assembleDebug \
+            :limbo-android-arm:assembleDebug \
+            :limbo-android-ppc:assembleDebug \
+            :limbo-android-sparc:assembleDebug
+
+      - name: Verify APKs and native libraries
+        run: |
+          set -euxo pipefail
+          find limbo-android-* -path '*/outputs/apk/debug/*.apk' -type f -size +0c -print
+          test "$(find limbo-android-* -path '*/outputs/apk/debug/*.apk' -type f -size +0c | wc -l)" -ge 4
+          for apk in limbo-android-*/build/outputs/apk/debug/*.apk; do
+            unzip -l "$apk" > /tmp/apk-list.txt
+            grep -q 'lib/arm64-v8a/libqemu-system-' /tmp/apk-list.txt
+            grep -q 'assets/roms/OVMF_CODE.fd' /tmp/apk-list.txt
+            grep -q 'assets/roms/OVMF_VARS.fd' /tmp/apk-list.txt
+          done
+
+      - name: Upload APKs and native build outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: limbo-android-arm64-guest-apks
+          path: |
+            limbo-android-*/build/outputs/apk/debug/*.apk
+            limbo-android-lib/src/main/assets/licenses/OVMF-LICENSE.txt
+          if-no-files-found: error
+          retention-days: 14
