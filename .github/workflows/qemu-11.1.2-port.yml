@@ -7,6 +7,8 @@ on:
     paths:
       - '.github/workflows/qemu-11.1.2-port.yml'
       - 'QEMU-11.1.2-PORTING.md'
+      - 'scripts/patch-qemu-11-android-shared.py'
+      - 'scripts/patch-qemu-11-limbo-android.py'
       - 'limbo-android-lib/src/main/jni/**'
   pull_request:
     branches:
@@ -112,6 +114,7 @@ jobs:
             --output /tmp/qemu-11.1.2.tar.xz
           tar -xJf /tmp/qemu-11.1.2.tar.xz -C "$RUNNER_TEMP"
           python3 scripts/patch-qemu-11-android-shared.py "$RUNNER_TEMP/qemu-11.1.2"
+          python3 scripts/patch-qemu-11-limbo-android.py "$RUNNER_TEMP/qemu-11.1.2"
 
       - name: Configure shared-library experiment with PIC objects
         working-directory: ${{ runner.temp }}/qemu-11.1.2
@@ -124,7 +127,8 @@ jobs:
             --disable-docs \
             --disable-werror \
             -Dlimbo_android_shared_library=true \
-            -Db_staticpic=true
+            -Db_staticpic=true \
+            -Dc_args=-D__LIMBO__
 
       - name: Build shared library
         working-directory: ${{ runner.temp }}/qemu-limbo-build
