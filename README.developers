@@ -341,3 +341,23 @@ See file COPYING under root directory
 and LICENSE under limbo-android-lib/src/main/assets
 
 Other source included are released under their own license please view Licenses under each subdirectory
+
+===============================================================================
+
+12. GitHub Actions build and UEFI firmware
+
+This source update advances the app version to 6.1.1. The workflow `.github/workflows/android.yml` is the reproducible CI entry point.
+It pins QEMU 5.1.0, GLib 2.56.1, libffi 3.3, pixman 0.40.0, SDL2 2.0.8 and
+Android NDK 23.1.7779620, downloads the source archives, applies the patches in
+`src/main/jni/patches`, builds native libraries for ARM64 Android hosts and the
+x86_64, AArch64, PPC64 and SPARC guest targets, then builds the APKs. A first
+successful GitHub Actions run is required to verify all upstream archive URLs
+and the complete legacy native toolchain.
+
+CI obtains OVMF firmware from Ubuntu's `ovmf` package and bundles `OVMF_CODE.fd`,
+`OVMF_VARS.fd` and the package copyright notice in the app assets. The app
+installs the files into its private Limbo cache. x86-64 guests use OVMF by default
+and receive an independent writable variable-store file in the machine directory.
+For a legacy BIOS guest, add `--limbo-uefi=off` to Extra QEMU parameters. This is a
+Limbo-specific switch and is removed before arguments are passed to QEMU. Custom
+`-bios` or pflash parameters disable automatic OVMF insertion.
