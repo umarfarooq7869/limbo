@@ -22,6 +22,32 @@ def edit(rel, old, new, label, count=1):
     p.write_text(text.replace(old, new, count))
     changes.append(label)
 
+# Android's NDK headers omit some Linux mmap constants used by QEMU.
+edit("include/qemu/osdep.h",
+"""#include "qemu/compiler.h"
+""",
+"""#include "qemu/compiler.h"
+
+#ifdef __ANDROID__
+#include <linux/mman.h>
+#endif
+""", "android-linux-mman-constants")
+
+# Android's printf implementation does not support glibc's %m extension.
+edit("accel/kvm/kvm-all.c",
+"""    if (s->fd == -1) {
+        error_report("Could not access KVM kernel module: %m");
+        ret = -errno;
+""",
+"""    if (s->fd == -1) {
+#ifdef __LIMBO__
+        error_report("Could not access KVM kernel module: /dev/kvm");
+#else
+        error_report("Could not access KVM kernel module: %m");
+#endif
+        ret = -errno;
+""", "android-kvm-error-format")
+
 # Runtime-adjustable refresh rates used by the existing JNI layer.
 edit("include/ui/console.h",
 """/* in ms */
